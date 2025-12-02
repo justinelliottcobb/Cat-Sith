@@ -1,7 +1,7 @@
 //! Raster renderer pipeline stage
 
 use async_trait::async_trait;
-use catsith_core::entity::{EntityType, EnvironmentType, SemanticEntity, ShipClass};
+use catsith_core::entity::SemanticEntity;
 use catsith_core::scene::Viewport;
 use catsith_core::{ImageFrame, RenderOutput};
 use catsith_pipeline::lora::LoraStack;
@@ -159,27 +159,12 @@ impl RasterRenderer {
     }
 
     /// Get sprite name for an entity
+    ///
+    /// Uses the entity's `sprite_key()` method which handles both the new
+    /// generic system (category + kind) and legacy EntityType for backward
+    /// compatibility.
     fn entity_sprite_name(&self, entity: &SemanticEntity) -> String {
-        match &entity.entity_type {
-            EntityType::Ship { class, .. } => {
-                let class_name = match class {
-                    ShipClass::Fighter => "fighter",
-                    ShipClass::Bomber => "bomber",
-                    ShipClass::Scout => "scout",
-                    _ => "fighter",
-                };
-                format!("{}_{}", class_name, entity.direction_index())
-            }
-            EntityType::Projectile { .. } => "bullet".to_string(),
-            EntityType::Environment { object_type } => match object_type {
-                EnvironmentType::Asteroid => "asteroid",
-                EnvironmentType::Debris => "debris",
-                EnvironmentType::Station => "station",
-                _ => "asteroid",
-            }
-            .to_string(),
-            _ => "asteroid".to_string(),
-        }
+        entity.sprite_key()
     }
 
     /// Convert world to screen coordinates
@@ -435,6 +420,7 @@ mod tests {
     use super::*;
     use catsith_core::entity::SemanticEntity;
     use catsith_core::scene::{Environment, Scene, Viewport};
+    use catsith_core::semantic::EntityKind;
     use catsith_core::style::PlayerStyle;
 
     #[tokio::test]
@@ -445,13 +431,7 @@ mod tests {
             ..Default::default()
         });
 
-        let entity = SemanticEntity::new(
-            EntityType::Ship {
-                class: ShipClass::Fighter,
-                owner_id: None,
-            },
-            [0.0, 0.0],
-        );
+        let entity = SemanticEntity::with_kind(EntityKind::Vehicle, "fighter", [0.0, 0.0]);
 
         let scene = Scene::new(1)
             .with_viewport(Viewport::new([0.0, 0.0], [100.0, 100.0]))

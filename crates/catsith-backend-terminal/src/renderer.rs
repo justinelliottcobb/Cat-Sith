@@ -369,21 +369,15 @@ impl PipelineStage for TerminalRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use catsith_core::entity::{EntityType, ShipClass};
     use catsith_core::scene::{Environment, Scene, Viewport};
+    use catsith_core::semantic::EntityKind;
     use catsith_core::style::PlayerStyle;
 
     #[tokio::test]
     async fn test_terminal_renderer() {
         let mut renderer = TerminalRenderer::new(80, 24);
 
-        let entity = SemanticEntity::new(
-            EntityType::Ship {
-                class: ShipClass::Fighter,
-                owner_id: None,
-            },
-            [0.0, 0.0],
-        );
+        let entity = SemanticEntity::with_kind(EntityKind::Vehicle, "fighter", [0.0, 0.0]);
 
         let scene = Scene::new(1)
             .with_viewport(Viewport::new([0.0, 0.0], [80.0, 24.0]))

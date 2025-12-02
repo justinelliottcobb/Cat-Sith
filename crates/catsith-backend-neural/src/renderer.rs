@@ -204,8 +204,9 @@ impl PipelineStage for NeuralRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use catsith_core::entity::{EntityType, SemanticEntity, ShipClass};
+    use catsith_core::entity::SemanticEntity;
     use catsith_core::scene::{Environment, Scene, Viewport};
+    use catsith_core::semantic::EntityKind;
     use catsith_core::style::PlayerStyle;
 
     #[tokio::test]
@@ -216,13 +217,7 @@ mod tests {
             ..Default::default()
         });
 
-        let entity = SemanticEntity::new(
-            EntityType::Ship {
-                class: ShipClass::Fighter,
-                owner_id: None,
-            },
-            [0.0, 0.0],
-        );
+        let entity = SemanticEntity::with_kind(EntityKind::Vehicle, "fighter", [0.0, 0.0]);
 
         let scene = Scene::new(1)
             .with_viewport(Viewport::new([0.0, 0.0], [100.0, 100.0]))

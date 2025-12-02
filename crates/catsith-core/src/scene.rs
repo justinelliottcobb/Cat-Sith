@@ -305,17 +305,11 @@ pub struct IdentityRef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity::{EntityType, ShipClass};
+    use crate::semantic::EntityKind;
 
     #[test]
     fn test_scene_builder() {
-        let entity = SemanticEntity::new(
-            EntityType::Ship {
-                class: ShipClass::Fighter,
-                owner_id: None,
-            },
-            [50.0, 50.0],
-        );
+        let entity = SemanticEntity::with_kind(EntityKind::Vehicle, "fighter", [50.0, 50.0]);
 
         let scene = Scene::new(1)
             .with_timestamp(0.016)

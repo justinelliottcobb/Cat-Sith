@@ -3,9 +3,11 @@
 use crate::DemoType;
 use catsith_backend_terminal::{TerminalOutput, TerminalRenderer};
 use catsith_core::RenderOutput;
-use catsith_core::entity::{EntityFlags, EntityState, EntityType, SemanticEntity, ShipClass};
-use catsith_core::scene::{Environment, Scene, SceneEvent, Viewport};
+use catsith_core::entity::EntityFlags;
+use catsith_core::scene::{Scene, Viewport};
 use catsith_core::style::PlayerStyle;
+use catsith_domain_exospace::{ExoSpaceEntity, ExoSpaceEnvironment, ExoSpaceEvent};
+use catsith_domain_exospace::entities::ShipClass;
 use catsith_pipeline::PipelineStage;
 use catsith_pipeline::stage::RenderContext;
 use std::time::{Duration, Instant};
@@ -109,7 +111,7 @@ async fn run_showcase_demo(
 
     let mut renderer = TerminalRenderer::new(width, height);
 
-    // Show different entity types
+    // Show different entity types using the ExoSpace domain crate
     let entities = vec![
         ("Fighter", ShipClass::Fighter),
         ("Bomber", ShipClass::Bomber),
@@ -123,15 +125,10 @@ async fn run_showcase_demo(
         for dir in 0..8 {
             let angle = dir as f64 * std::f64::consts::PI / 4.0;
 
-            let entity = SemanticEntity::new(
-                EntityType::Ship {
-                    class,
-                    owner_id: None,
-                },
-                [width as f64 / 2.0, height as f64 / 2.0],
-            )
-            .with_rotation(angle)
-            .with_state(EntityState::full().with_flags(EntityFlags::THRUSTING));
+            let entity = ExoSpaceEntity::ship(class, [width as f64 / 2.0, height as f64 / 2.0])
+                .with_rotation(angle)
+                .with_flags(EntityFlags::THRUSTING)
+                .build();
 
             let scene = Scene::new(dir as u64)
                 .with_viewport(Viewport::new(
@@ -139,7 +136,7 @@ async fn run_showcase_demo(
                     [width as f64, height as f64],
                 ))
                 .with_entity(entity)
-                .with_environment(Environment::space());
+                .with_environment(ExoSpaceEnvironment::space());
 
             let context = RenderContext::new(scene, PlayerStyle::terminal());
             let result = renderer.process(context).await?;
@@ -168,21 +165,16 @@ async fn run_showcase_demo(
     Ok(())
 }
 
-/// Create an animated demo scene
+/// Create an animated demo scene using ExoSpace domain types
 fn create_demo_scene(time: f64, width: f64, height: f64) -> Scene {
     let center_x = width / 2.0;
     let center_y = height / 2.0;
 
     // Player ship at center
-    let player = SemanticEntity::new(
-        EntityType::Ship {
-            class: ShipClass::Fighter,
-            owner_id: None,
-        },
-        [center_x, center_y],
-    )
-    .with_rotation(time * 2.0)
-    .with_state(EntityState::full().with_flags(EntityFlags::THRUSTING));
+    let player = ExoSpaceEntity::fighter([center_x, center_y])
+        .with_rotation(time * 2.0)
+        .with_flags(EntityFlags::THRUSTING)
+        .build();
 
     // Orbiting enemy
     let orbit_radius = 15.0;
@@ -190,19 +182,11 @@ fn create_demo_scene(time: f64, width: f64, height: f64) -> Scene {
     let enemy_y = center_y + orbit_radius * (time * 1.5).sin();
     let enemy_angle = time * 1.5 + std::f64::consts::PI;
 
-    let enemy = SemanticEntity::new(
-        EntityType::Ship {
-            class: ShipClass::Bomber,
-            owner_id: None,
-        },
-        [enemy_x, enemy_y],
-    )
-    .with_rotation(enemy_angle)
-    .with_state(
-        EntityState::default()
-            .with_health(0.7)
-            .with_flags(EntityFlags::DAMAGED),
-    );
+    let enemy = ExoSpaceEntity::bomber([enemy_x, enemy_y])
+        .with_rotation(enemy_angle)
+        .with_health(0.7)
+        .with_flags(EntityFlags::DAMAGED)
+        .build();
 
     // Create some asteroids
     let mut entities = vec![player, enemy];
@@ -211,29 +195,26 @@ fn create_demo_scene(time: f64, width: f64, height: f64) -> Scene {
         let ax = 10.0 + (i as f64 * 17.0 + time * 2.0) % (width - 20.0);
         let ay = 5.0 + (i as f64 * 11.0) % (height - 10.0);
 
-        let asteroid = SemanticEntity::new(
-            EntityType::Environment {
-                object_type: catsith_core::entity::EnvironmentType::Asteroid,
-            },
-            [ax, ay],
-        );
+        let asteroid = ExoSpaceEntity::asteroid([ax, ay]).build();
         entities.push(asteroid);
     }
 
-    // Occasional explosion
-    let mut events = Vec::new();
-    if (time * 2.0) % 3.0 < 0.5 {
-        events.push(SceneEvent::Explosion {
-            position: [center_x + 20.0, center_y - 5.0],
-            radius: 3.0,
-            intensity: 1.0,
-            age: ((time * 2.0) % 3.0) / 0.5,
-        });
-    }
-
-    Scene::new((time * 60.0) as u64)
+    // Build the base scene
+    let mut scene = Scene::new((time * 60.0) as u64)
         .with_timestamp(time)
         .with_viewport(Viewport::new([center_x, center_y], [width, height]))
         .with_entities(entities)
-        .with_environment(Environment::space())
+        .with_environment(ExoSpaceEnvironment::space());
+
+    // Occasional explosion using ExoSpace event builder
+    if (time * 2.0) % 3.0 < 0.5 {
+        let age = ((time * 2.0) % 3.0) / 0.5;
+        scene = scene.with_event(
+            ExoSpaceEvent::explosion([center_x + 20.0, center_y - 5.0], 3.0)
+                .with_age(age)
+                .build(),
+        );
+    }
+
+    scene
 }

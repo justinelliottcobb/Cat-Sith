@@ -1,0 +1,12 @@
+[package]
+name = "catsith-domain-exospace"
+description = "ExoSpace domain types and rendering for CatSith"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+catsith-core = { workspace = true }
+serde = { workspace = true }

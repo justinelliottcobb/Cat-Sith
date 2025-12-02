@@ -310,6 +310,7 @@ dependencies = [
  "catsith-backend-raster",
  "catsith-backend-terminal",
  "catsith-core",
+ "catsith-domain-exospace",
  "catsith-lora",
  "catsith-pipeline",
  "clap",
@@ -329,6 +330,14 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.17",
  "uuid",
+]
+
+[[package]]
+name = "catsith-domain-exospace"
+version = "0.1.0"
+dependencies = [
+ "catsith-core",
+ "serde",
 ]
 
 [[package]]

@@ -18,6 +18,7 @@ catsith-pipeline = { workspace = true }
 catsith-backend-terminal = { workspace = true }
 catsith-backend-raster = { workspace = true }
 catsith-lora = { workspace = true }
+catsith-domain-exospace = { workspace = true }
 
 tokio = { workspace = true }
 tracing = { workspace = true }
