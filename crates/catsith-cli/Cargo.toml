@@ -1,0 +1,27 @@
+[package]
+name = "catsith-cli"
+description = "CLI tool for CatSith neural rendering frontend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "catsith"
+path = "src/main.rs"
+
+[dependencies]
+catsith-core = { workspace = true }
+catsith-api = { workspace = true }
+catsith-pipeline = { workspace = true }
+catsith-backend-terminal = { workspace = true }
+catsith-backend-raster = { workspace = true }
+catsith-lora = { workspace = true }
+
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+serde_json = { workspace = true }

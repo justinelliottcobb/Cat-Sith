@@ -1,0 +1,17 @@
+# CatSith clippy configuration
+# https://doc.rust-lang.org/clippy/configuration.html
+
+# Cognitive complexity threshold for functions
+cognitive-complexity-threshold = 25
+
+# Max number of lines in a function body
+too-many-lines-threshold = 100
+
+# Allow common patterns
+allow-unwrap-in-tests = true
+
+# Type complexity threshold
+type-complexity-threshold = 250
+
+# MSRV - Minimum Supported Rust Version
+msrv = "1.85"

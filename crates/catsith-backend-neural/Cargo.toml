@@ -1,0 +1,27 @@
+[package]
+name = "catsith-backend-neural"
+description = "Neural inference rendering backend for CatSith"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+catsith-core = { workspace = true }
+catsith-pipeline = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+image = { workspace = true }
+
+# Neural inference - optional since it requires model files
+# tract-onnx = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
+
+[features]
+default = []
+# Enable tract ONNX inference
+# onnx = ["tract-onnx"]

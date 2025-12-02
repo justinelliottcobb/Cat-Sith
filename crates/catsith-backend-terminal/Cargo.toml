@@ -1,0 +1,19 @@
+[package]
+name = "catsith-backend-terminal"
+description = "Terminal/ASCII rendering backend for CatSith"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+catsith-core = { workspace = true }
+catsith-pipeline = { workspace = true }
+async-trait = { workspace = true }
+crossterm = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
