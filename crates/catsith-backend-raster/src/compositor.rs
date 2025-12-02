@@ -3,6 +3,7 @@
 //! Composites multiple render layers into a final image.
 
 use catsith_core::ImageFrame;
+use rayon::prelude::*;
 
 /// Blend mode for layer composition
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -133,39 +134,88 @@ impl LayerCompositor {
         output
     }
 
-    /// Blend a single layer onto the output
+    /// Blend a single layer onto the output using parallel row processing
     fn blend_layer(&self, output: &mut ImageFrame, layer: &RenderLayer) {
         if layer.opacity <= 0.0 {
             return;
         }
 
-        for dy in 0..layer.frame.height {
-            for dx in 0..layer.frame.width {
-                let out_x = dx as i32 + layer.offset.0;
-                let out_y = dy as i32 + layer.offset.1;
+        let output_width = output.width;
+        let output_height = output.height;
+        let layer_width = layer.frame.width;
+        let layer_height = layer.frame.height;
+        let offset_x = layer.offset.0;
+        let offset_y = layer.offset.1;
+        let blend_mode = layer.blend_mode;
+        let opacity = layer.opacity;
 
-                if out_x < 0 || out_y < 0 {
-                    continue;
-                }
+        // Calculate the effective row range we need to process
+        let start_row = offset_y.max(0) as u32;
+        let end_row = ((offset_y + layer_height as i32) as u32).min(output_height);
 
-                let out_x = out_x as u32;
-                let out_y = out_y as u32;
-
-                if out_x >= output.width || out_y >= output.height {
-                    continue;
-                }
-
-                let src = layer.frame.get_pixel(dx, dy).unwrap_or([0, 0, 0, 0]);
-                let dst = output.get_pixel(out_x, out_y).unwrap_or([0, 0, 0, 0]);
-
-                let blended = self.blend_pixels(src, dst, layer.blend_mode, layer.opacity);
-                output.set_pixel(out_x, out_y, blended);
-            }
+        if start_row >= end_row {
+            return;
         }
+
+        // Process output rows in parallel
+        // Each row in the output is independent, so we can safely parallelize
+        let row_stride = (output_width * 4) as usize;
+
+        output
+            .data
+            .par_chunks_mut(row_stride)
+            .enumerate()
+            .filter(|(out_y, _)| {
+                let out_y = *out_y as u32;
+                out_y >= start_row && out_y < end_row
+            })
+            .for_each(|(out_y, row_data)| {
+                let out_y = out_y as i32;
+                let layer_y = out_y - offset_y;
+
+                if layer_y < 0 || layer_y >= layer_height as i32 {
+                    return;
+                }
+
+                let layer_y = layer_y as u32;
+
+                // Calculate x range for this row
+                let start_x = offset_x.max(0) as u32;
+                let end_x = ((offset_x + layer_width as i32) as u32).min(output_width);
+
+                for out_x in start_x..end_x {
+                    let layer_x = (out_x as i32 - offset_x) as u32;
+
+                    let src = layer
+                        .frame
+                        .get_pixel(layer_x, layer_y)
+                        .unwrap_or([0, 0, 0, 0]);
+
+                    let dst_idx = (out_x * 4) as usize;
+                    let dst = [
+                        row_data[dst_idx],
+                        row_data[dst_idx + 1],
+                        row_data[dst_idx + 2],
+                        row_data[dst_idx + 3],
+                    ];
+
+                    let blended = Self::blend_pixels_static(src, dst, blend_mode, opacity);
+
+                    row_data[dst_idx] = blended[0];
+                    row_data[dst_idx + 1] = blended[1];
+                    row_data[dst_idx + 2] = blended[2];
+                    row_data[dst_idx + 3] = blended[3];
+                }
+            });
     }
 
-    /// Blend two pixels
-    fn blend_pixels(&self, src: [u8; 4], dst: [u8; 4], mode: BlendMode, opacity: f32) -> [u8; 4] {
+    /// Blend two pixels (static version for parallel use)
+    fn blend_pixels_static(
+        src: [u8; 4],
+        dst: [u8; 4],
+        mode: BlendMode,
+        opacity: f32,
+    ) -> [u8; 4] {
         let src_a = (src[3] as f32 / 255.0) * opacity;
 
         if src_a <= 0.0 {
@@ -238,6 +288,7 @@ impl LayerCompositor {
             }
         }
     }
+
 }
 
 #[cfg(test)]
@@ -284,12 +335,10 @@ mod tests {
 
     #[test]
     fn test_additive_blend() {
-        let compositor = LayerCompositor::new(100, 100);
-
         let dst = [100, 100, 100, 255];
         let src = [50, 50, 50, 255];
 
-        let result = compositor.blend_pixels(src, dst, BlendMode::Additive, 1.0);
+        let result = LayerCompositor::blend_pixels_static(src, dst, BlendMode::Additive, 1.0);
 
         // Additive should add values
         assert_eq!(result[0], 150);

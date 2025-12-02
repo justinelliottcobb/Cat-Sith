@@ -6,6 +6,7 @@ use catsith_core::scene::Viewport;
 use catsith_core::{ImageFrame, RenderOutput};
 use catsith_pipeline::lora::LoraStack;
 use catsith_pipeline::stage::{PipelineStage, RenderContext, StageError};
+use rayon::prelude::*;
 
 use crate::atlas::{AtlasManager, SpriteAtlas, SpriteRegion};
 use crate::compositor::{BlendMode, LayerCompositor, RenderLayer};
@@ -280,27 +281,76 @@ impl RasterRenderer {
                 let screen_radius =
                     (*radius / viewport.extent[0] * self.config.width as f64) as i32;
                 let fade = (1.0 - age) as f32;
-                let intensity = (*intensity as f32 * fade * 255.0) as u8;
+                let intensity_val = (*intensity as f32 * fade * 255.0) as u8;
 
-                // Draw circular explosion
-                for dy in -screen_radius..=screen_radius {
-                    for dx in -screen_radius..=screen_radius {
-                        let dist_sq = dx * dx + dy * dy;
-                        if dist_sq <= screen_radius * screen_radius {
-                            let fx = screen.0 + dx;
-                            let fy = screen.1 + dy;
+                // Calculate bounds for the explosion area
+                let min_y = (screen.1 - screen_radius).max(0) as u32;
+                let max_y = ((screen.1 + screen_radius + 1) as u32).min(frame.height);
+                let frame_width = frame.width;
+                let row_stride = (frame_width * 4) as usize;
 
-                            if fx >= 0
-                                && fy >= 0
-                                && (fx as u32) < frame.width
-                                && (fy as u32) < frame.height
-                            {
-                                let dist_factor =
-                                    1.0 - (dist_sq as f32 / (screen_radius * screen_radius) as f32);
-                                let r = (intensity as f32 * dist_factor) as u8;
-                                let g = (intensity as f32 * dist_factor * 0.5) as u8;
+                // Only parallelize if the explosion is large enough
+                if screen_radius > 10 {
+                    let radius_sq = screen_radius * screen_radius;
 
-                                frame.set_pixel(fx as u32, fy as u32, [r, g, 0, 255]);
+                    // Process rows in parallel within the explosion bounds
+                    frame
+                        .data
+                        .par_chunks_mut(row_stride)
+                        .enumerate()
+                        .filter(|(y, _)| {
+                            let y = *y as u32;
+                            y >= min_y && y < max_y
+                        })
+                        .for_each(|(fy, row_data)| {
+                            let dy = fy as i32 - screen.1;
+
+                            // Calculate x range for this row based on circle equation
+                            let x_range_sq = radius_sq - dy * dy;
+                            if x_range_sq >= 0 {
+                                let x_range = (x_range_sq as f32).sqrt() as i32;
+                                let min_x = (screen.0 - x_range).max(0) as u32;
+                                let max_x = ((screen.0 + x_range + 1) as u32).min(frame_width);
+
+                                for fx in min_x..max_x {
+                                    let dx = fx as i32 - screen.0;
+                                    let dist_sq = dx * dx + dy * dy;
+
+                                    if dist_sq <= radius_sq {
+                                        let dist_factor = 1.0 - (dist_sq as f32 / radius_sq as f32);
+                                        let r = (intensity_val as f32 * dist_factor) as u8;
+                                        let g = (intensity_val as f32 * dist_factor * 0.5) as u8;
+
+                                        let idx = (fx * 4) as usize;
+                                        row_data[idx] = r;
+                                        row_data[idx + 1] = g;
+                                        row_data[idx + 2] = 0;
+                                        row_data[idx + 3] = 255;
+                                    }
+                                }
+                            }
+                        });
+                } else {
+                    // Small explosions: sequential processing to avoid overhead
+                    for dy in -screen_radius..=screen_radius {
+                        for dx in -screen_radius..=screen_radius {
+                            let dist_sq = dx * dx + dy * dy;
+                            if dist_sq <= screen_radius * screen_radius {
+                                let fx = screen.0 + dx;
+                                let fy = screen.1 + dy;
+
+                                if fx >= 0
+                                    && fy >= 0
+                                    && (fx as u32) < frame.width
+                                    && (fy as u32) < frame.height
+                                {
+                                    let dist_factor = 1.0
+                                        - (dist_sq as f32 / (screen_radius * screen_radius) as f32);
+                                    let r = (intensity_val as f32 * dist_factor) as u8;
+                                    let g = (intensity_val as f32 * dist_factor * 0.5) as u8;
+
+                                    frame.set_pixel(fx as u32, fy as u32, [r, g, 0, 255]);
+                                }
                             }
                         }
                     }

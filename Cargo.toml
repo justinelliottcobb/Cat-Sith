@@ -47,6 +47,9 @@ tract-onnx = "0.21"
 # Image processing
 image = "0.25"
 
+# Parallelism
+rayon = "1.10"
+
 # Utilities
 thiserror = "2.0"
 tracing = "0.1"

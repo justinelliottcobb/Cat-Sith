@@ -6,6 +6,7 @@ use catsith_core::scene::{Environment, SceneEvent, Viewport};
 use catsith_core::{RenderOutput, TerminalCell, TerminalFrame};
 use catsith_pipeline::LoraStack;
 use catsith_pipeline::stage::{PipelineStage, RenderContext, StageError};
+use rayon::prelude::*;
 
 use crate::color::ColorMapper;
 use crate::sprites::SpriteGenerator;
@@ -119,52 +120,65 @@ impl TerminalRenderer {
         }
     }
 
-    /// Render sparse starfield
+    /// Render sparse starfield using parallel row processing
     fn render_starfield(&self, frame: &mut TerminalFrame, _bg_color: [u8; 3], density: f64) {
-        // Deterministic "random" based on position
-        for y in 0..frame.height {
-            for x in 0..frame.width {
-                let hash = (x * 13 + y * 7 + x * y) % 1000;
-                if (hash as f64 / 1000.0) < density {
-                    let brightness = (hash % 3) as u8;
-                    let ch = match brightness {
-                        0 => '.',
-                        1 => '*',
-                        _ => '+',
-                    };
-                    let intensity = 50 + (brightness * 40);
-                    frame.set(
-                        x,
-                        y,
-                        TerminalCell::new(ch).with_fg([intensity, intensity, intensity]),
-                    );
+        let width = frame.width;
+
+        // Process rows in parallel
+        frame
+            .cells
+            .par_chunks_mut(width as usize)
+            .enumerate()
+            .for_each(|(y, row)| {
+                let y = y as u32;
+                for x in 0..width {
+                    let hash = (x * 13 + y * 7 + x * y) % 1000;
+                    if (hash as f64 / 1000.0) < density {
+                        let brightness = (hash % 3) as u8;
+                        let ch = match brightness {
+                            0 => '.',
+                            1 => '*',
+                            _ => '+',
+                        };
+                        let intensity = 50 + (brightness * 40);
+                        row[x as usize] =
+                            TerminalCell::new(ch).with_fg([intensity, intensity, intensity]);
+                    }
                 }
-            }
-        }
+            });
     }
 
-    /// Render nebula background
+    /// Render nebula background using parallel row processing
     fn render_nebula(&self, frame: &mut TerminalFrame, base_color: [u8; 3]) {
-        for y in 0..frame.height {
-            for x in 0..frame.width {
-                let hash = (x * 17 + y * 11 + x * y * 3) % 1000;
-                if (hash as f64 / 1000.0) < 0.15 {
-                    // Vary color based on position
-                    let r = base_color[0].saturating_add(((x % 30) as u8).saturating_mul(2));
-                    let g = base_color[1].saturating_add(((y % 20) as u8).saturating_mul(2));
-                    let b = base_color[2].saturating_add((((x + y) % 25) as u8).saturating_mul(2));
+        let width = frame.width;
 
-                    let ch = match hash % 4 {
-                        0 => '~',
-                        1 => '≈',
-                        2 => '░',
-                        _ => '.',
-                    };
+        // Process rows in parallel
+        frame
+            .cells
+            .par_chunks_mut(width as usize)
+            .enumerate()
+            .for_each(|(y, row)| {
+                let y = y as u32;
+                for x in 0..width {
+                    let hash = (x * 17 + y * 11 + x * y * 3) % 1000;
+                    if (hash as f64 / 1000.0) < 0.15 {
+                        // Vary color based on position
+                        let r = base_color[0].saturating_add(((x % 30) as u8).saturating_mul(2));
+                        let g = base_color[1].saturating_add(((y % 20) as u8).saturating_mul(2));
+                        let b =
+                            base_color[2].saturating_add((((x + y) % 25) as u8).saturating_mul(2));
 
-                    frame.set(x, y, TerminalCell::new(ch).with_fg([r, g, b]));
+                        let ch = match hash % 4 {
+                            0 => '~',
+                            1 => '≈',
+                            2 => '░',
+                            _ => '.',
+                        };
+
+                        row[x as usize] = TerminalCell::new(ch).with_fg([r, g, b]);
+                    }
                 }
-            }
-        }
+            });
     }
 
     /// Render scene events (explosions, beams, etc.)
@@ -254,26 +268,20 @@ impl TerminalRenderer {
             }
 
             SceneEvent::Flash { intensity, color } => {
-                // Flash affects entire screen
+                // Flash affects entire screen - parallelize by row
                 let flash_color = color.unwrap_or([255, 255, 255]);
                 let alpha = *intensity as f32;
+                let inv_alpha = 1.0 - alpha;
 
-                for y in 0..frame.height {
-                    for x in 0..frame.width {
-                        if let Some(cell) = frame.get_mut(x, y) {
-                            // Blend toward flash color
-                            cell.fg[0] = (cell.fg[0] as f32 * (1.0 - alpha)
-                                + flash_color[0] as f32 * alpha)
-                                as u8;
-                            cell.fg[1] = (cell.fg[1] as f32 * (1.0 - alpha)
-                                + flash_color[1] as f32 * alpha)
-                                as u8;
-                            cell.fg[2] = (cell.fg[2] as f32 * (1.0 - alpha)
-                                + flash_color[2] as f32 * alpha)
-                                as u8;
-                        }
-                    }
-                }
+                frame.cells.par_iter_mut().for_each(|cell| {
+                    // Blend toward flash color
+                    cell.fg[0] =
+                        (cell.fg[0] as f32 * inv_alpha + flash_color[0] as f32 * alpha) as u8;
+                    cell.fg[1] =
+                        (cell.fg[1] as f32 * inv_alpha + flash_color[1] as f32 * alpha) as u8;
+                    cell.fg[2] =
+                        (cell.fg[2] as f32 * inv_alpha + flash_color[2] as f32 * alpha) as u8;
+                });
             }
 
             SceneEvent::Shake { .. } => {
