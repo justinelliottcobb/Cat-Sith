@@ -7,6 +7,7 @@ members = [
     "crates/catsith-backend-neural",
     "crates/catsith-backend-raster",
     "crates/catsith-lora",
+    "crates/catsith-kan",
     "crates/catsith-domain-exospace",
     "crates/catsith-cli",
 ]
@@ -29,6 +30,7 @@ catsith-backend-terminal = { path = "crates/catsith-backend-terminal" }
 catsith-backend-neural = { path = "crates/catsith-backend-neural" }
 catsith-backend-raster = { path = "crates/catsith-backend-raster" }
 catsith-lora = { path = "crates/catsith-lora" }
+catsith-kan = { path = "crates/catsith-kan" }
 catsith-domain-exospace = { path = "crates/catsith-domain-exospace" }
 
 # Serialization

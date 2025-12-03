@@ -10,20 +10,30 @@
 //! 1. **Embedder**: Converts semantic descriptions to embeddings
 //! 2. **Sprite VAE**: Generates small sprites from embeddings
 //! 3. **Diffusion**: Generates high-quality images (optional)
+//! 4. **KAN**: Kolmogorov-Arnold Networks for learned sprite generation (optional)
 //!
 //! # Model Loading
 //!
 //! Models are loaded from disk or downloaded on demand.
-//! Supported formats: ONNX (via tract)
+//! Supported formats: ONNX (via tract), KAN (native Rust with WebGPU)
+//!
+//! # Implementation Status
+//!
+//! See [`onnx`] module for the ONNX integration design and implementation plan.
+//! See `docs/NEURAL_MODELS.md` for model recommendations and training roadmap.
 
 pub mod embedder;
 pub mod inference;
+#[cfg(feature = "kan")]
+pub mod kan;
 pub mod models;
+pub mod onnx;
 pub mod renderer;
 pub mod temporal;
 
 // Re-export commonly used types
 pub use embedder::TextEmbedder;
 pub use inference::{InferenceEngine, InferenceError};
+pub use onnx::{DiffusionPipeline, OnnxRuntime, SpriteVAE};
 pub use renderer::NeuralRenderer;
 pub use temporal::TemporalCoherence;

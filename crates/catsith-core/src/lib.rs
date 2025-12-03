@@ -46,8 +46,8 @@ pub mod style;
 pub use capability::{BackendType, GpuCapabilities, GpuVendor, RenderCapabilities};
 pub use entity::{EntityFlags, EntityId, EntityState, EntityType, SemanticEntity};
 pub use intent::{
-    ColorScheme, EntityIdentity, LoraRef, OutputFormat, PreviousRender, QualityTier, RenderIntent,
-    RenderTarget,
+    ColorScheme, EntityIdentity, ImageFormat, LoraRef, OutputFormat, PreviousRender, QualityTier,
+    RenderIntent, RenderTarget,
 };
 pub use output::{ImageFrame, RenderOutput, TensorFrame, TerminalCell, TerminalFrame};
 pub use scene::{Ambiance, Environment, IdentityRef, LightingMood, Scene, SceneEvent, Viewport};

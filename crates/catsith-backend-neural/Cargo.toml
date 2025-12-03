@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 catsith-core = { workspace = true }
 catsith-pipeline = { workspace = true }
+catsith-kan = { workspace = true, optional = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -25,3 +26,5 @@ tokio = { workspace = true, features = ["test-util", "macros"] }
 default = []
 # Enable tract ONNX inference
 # onnx = ["tract-onnx"]
+# Enable KAN-based sprite generation
+kan = ["catsith-kan"]
