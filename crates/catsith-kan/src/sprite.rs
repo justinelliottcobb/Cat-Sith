@@ -422,14 +422,94 @@ fn inverse_sigmoid(y: f32) -> f32 {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_sprite_latent_lerp() {
+    // --- SpriteLatent tests ---
+
+    #[test]
+    fn test_sprite_latent_new() {
+        let latent = SpriteLatent::new(vec![1.0, 2.0, 3.0]);
+        assert_eq!(latent.dim(), 3);
+        assert_eq!(latent.code, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn test_sprite_latent_random() {
+        let latent = SpriteLatent::random(16);
+        assert_eq!(latent.dim(), 16);
+
+        // Random values should be in [-1, 1]
+        for val in &latent.code {
+            assert!(*val >= -1.0 && *val <= 1.0);
+        }
+    }
+
+    #[test]
+    fn test_sprite_latent_zeros() {
+        let latent = SpriteLatent::zeros(8);
+        assert_eq!(latent.dim(), 8);
+
+        for val in &latent.code {
+            assert_eq!(*val, 0.0);
+        }
+    }
+
+    #[test]
+    fn test_sprite_latent_lerp() {
         let a = SpriteLatent::new(vec![0.0, 0.0]);
         let b = SpriteLatent::new(vec![1.0, 1.0]);
 
         let mid = a.lerp(&b, 0.5);
         assert!((mid.code[0] - 0.5).abs() < 1e-6);
         assert!((mid.code[1] - 0.5).abs() < 1e-6);
+
+        // Test endpoints
+        let start = a.lerp(&b, 0.0);
+        assert!((start.code[0] - 0.0).abs() < 1e-6);
+
+        let end = a.lerp(&b, 1.0);
+        assert!((end.code[0] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_sprite_latent_slerp() {
+        let a = SpriteLatent::new(vec![1.0, 0.0]);
+        let b = SpriteLatent::new(vec![0.0, 1.0]);
+
+        let mid = a.slerp(&b, 0.5);
+
+        // Slerp should produce a point on the arc between a and b
+        // The magnitude should be close to 1 (unit vectors)
+        let mag: f32 = mid.code.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (mag - 1.0).abs() < 0.1,
+            "Slerp should preserve approximate magnitude"
+        );
+
+        // The interpolated point should be between a and b
+        assert!(mid.code[0] > 0.0 && mid.code[0] < 1.0);
+        assert!(mid.code[1] > 0.0 && mid.code[1] < 1.0);
+    }
+
+    #[test]
+    fn test_sprite_latent_slerp_same_vector() {
+        let a = SpriteLatent::new(vec![1.0, 0.0]);
+        let b = SpriteLatent::new(vec![1.0, 0.0]);
+
+        // Slerp of same vector should return that vector
+        let result = a.slerp(&b, 0.5);
+        assert!((result.code[0] - 1.0).abs() < 1e-5);
+        assert!((result.code[1] - 0.0).abs() < 1e-5);
+    }
+
+    // --- SpriteKAN tests ---
+
+    #[tokio::test]
+    async fn test_sprite_kan_creation() {
+        let gpu = GpuContext::new().await.unwrap();
+        let sprite_kan = SpriteKAN::new(gpu, 8, &[16], &[4, 4], 8, 8).unwrap();
+
+        assert_eq!(sprite_kan.latent_dim, 8);
+        assert_eq!(sprite_kan.width, 8);
+        assert_eq!(sprite_kan.height, 8);
     }
 
     #[tokio::test]
@@ -441,5 +521,121 @@ mod tests {
         let pixels = sprite_kan.generate(&latent).unwrap();
 
         assert_eq!(pixels.len(), 8 * 8 * 4); // 8x8 RGBA
+    }
+
+    #[tokio::test]
+    async fn test_sprite_kan_generate_sized() {
+        let gpu = GpuContext::new().await.unwrap();
+        let sprite_kan = SpriteKAN::new(gpu, 8, &[16], &[4, 4], 8, 8).unwrap();
+
+        let latent = SpriteLatent::random(8);
+
+        // Generate at different sizes
+        let pixels_16 = sprite_kan.generate_sized(&latent, 16, 16).unwrap();
+        assert_eq!(pixels_16.len(), 16 * 16 * 4);
+
+        let pixels_4 = sprite_kan.generate_sized(&latent, 4, 4).unwrap();
+        assert_eq!(pixels_4.len(), 4 * 4 * 4);
+    }
+
+    #[tokio::test]
+    async fn test_sprite_kan_wrong_latent_dim() {
+        let gpu = GpuContext::new().await.unwrap();
+        let sprite_kan = SpriteKAN::new(gpu, 8, &[16], &[4, 4], 8, 8).unwrap();
+
+        let wrong_latent = SpriteLatent::random(16); // Wrong dimension
+        let result = sprite_kan.generate(&wrong_latent);
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_sprite_kan_pixels_in_valid_range() {
+        let gpu = GpuContext::new().await.unwrap();
+        let sprite_kan = SpriteKAN::new(gpu, 8, &[16], &[4, 4], 8, 8).unwrap();
+
+        let latent = SpriteLatent::random(8);
+        let pixels = sprite_kan.generate(&latent).unwrap();
+
+        // Pixels should have been generated (non-empty)
+        assert!(!pixels.is_empty());
+        // Since pixels are u8, they're inherently in valid range 0-255
+    }
+
+    #[tokio::test]
+    async fn test_sprite_kan_deterministic() {
+        let gpu = GpuContext::new().await.unwrap();
+        let sprite_kan = SpriteKAN::new(gpu, 8, &[16], &[4, 4], 4, 4).unwrap();
+
+        let latent = SpriteLatent::new(vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]);
+
+        let pixels1 = sprite_kan.generate(&latent).unwrap();
+        let pixels2 = sprite_kan.generate(&latent).unwrap();
+
+        assert_eq!(pixels1, pixels2, "Same latent should produce same pixels");
+    }
+
+    #[tokio::test]
+    async fn test_sprite_kan_forward_pass_works() {
+        // Test that the forward pass produces valid output for different latents
+        // Note: An untrained network may produce similar outputs due to sigmoid
+        // saturation around 0.5, but the forward pass should still complete
+        let gpu = GpuContext::new().await.unwrap();
+        let sprite_kan = SpriteKAN::new(gpu, 8, &[16], &[4, 4], 4, 4).unwrap();
+
+        let latent1 = SpriteLatent::new(vec![0.1; 8]);
+        let latent2 = SpriteLatent::new(vec![0.9; 8]);
+
+        // Both should produce valid output
+        let pixels1 = sprite_kan.generate(&latent1).unwrap();
+        let pixels2 = sprite_kan.generate(&latent2).unwrap();
+
+        // Same size
+        assert_eq!(pixels1.len(), pixels2.len());
+        // Expected size for 4x4 RGBA
+        assert_eq!(pixels1.len(), 4 * 4 * 4);
+    }
+
+    #[tokio::test]
+    async fn test_sprite_kan_parameter_count() {
+        let gpu = GpuContext::new().await.unwrap();
+        let sprite_kan = SpriteKAN::new(gpu, 8, &[16], &[4, 4], 8, 8).unwrap();
+
+        let count = sprite_kan.parameter_count();
+        assert!(count > 0, "Should have parameters");
+    }
+
+    #[tokio::test]
+    async fn test_sprite_kan_train() {
+        let gpu = GpuContext::new().await.unwrap();
+        let mut sprite_kan = SpriteKAN::new(gpu, 4, &[8], &[4, 4], 4, 4).unwrap();
+
+        let latent = SpriteLatent::random(4);
+
+        // Create a simple target (all red)
+        let target: Vec<u8> = (0..4 * 4)
+            .flat_map(|_| vec![255, 0, 0, 255])
+            .collect();
+
+        // Training should run without panic
+        let loss = sprite_kan.train(&latent, &target, 0.01).unwrap();
+        assert!(loss.is_finite(), "Loss should be finite");
+    }
+
+    #[tokio::test]
+    async fn test_sprite_kan_config_mismatch() {
+        let gpu = GpuContext::new().await.unwrap();
+
+        // functions_per_layer length doesn't match number of layers
+        let result = SpriteKAN::new(
+            gpu,
+            8,
+            &[16, 16],  // 2 hidden layers = 3 total layers
+            &[4, 4],    // Only 2 function counts (should be 3)
+            8,
+            8,
+        );
+
+        assert!(result.is_err());
     }
 }

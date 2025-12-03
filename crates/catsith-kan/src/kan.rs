@@ -185,6 +185,40 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn test_kan_creation() {
+        let gpu = GpuContext::new().await.unwrap();
+        let kan = KAN::new(gpu, &[2, 4, 1], &[4, 4], -1.0..1.0, 8, 3).unwrap();
+
+        assert_eq!(kan.layers.len(), 2); // 2 -> 4 -> 1 = 2 layers
+    }
+
+    #[tokio::test]
+    async fn test_kan_creation_single_layer() {
+        let gpu = GpuContext::new().await.unwrap();
+        let kan = KAN::new(gpu, &[3, 2], &[4], -1.0..1.0, 8, 3).unwrap();
+
+        assert_eq!(kan.layers.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_kan_creation_invalid_dims() {
+        let gpu = GpuContext::new().await.unwrap();
+
+        // Only one dimension (no layers)
+        let result = KAN::new(gpu, &[3], &[], -1.0..1.0, 8, 3);
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_kan_creation_mismatched_functions() {
+        let gpu = GpuContext::new().await.unwrap();
+
+        // 2 layers but only 1 function count
+        let result = KAN::new(gpu, &[2, 4, 1], &[4], -1.0..1.0, 8, 3);
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
     async fn test_kan_forward() {
         let gpu = GpuContext::new().await.unwrap();
         let kan = KAN::new(gpu, &[2, 4, 1], &[4, 4], -1.0..1.0, 8, 3).unwrap();
@@ -193,6 +227,45 @@ mod tests {
         let output = kan.forward(&input).unwrap();
 
         assert_eq!(output.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_kan_forward_gpu() {
+        let gpu = GpuContext::new().await.unwrap();
+        let kan = KAN::new(gpu, &[2, 4, 1], &[4, 4], -1.0..1.0, 8, 3).unwrap();
+
+        let input = vec![0.5, -0.3];
+        let output = kan.forward_gpu(&input).await.unwrap();
+
+        assert_eq!(output.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_kan_forward_produces_finite() {
+        let gpu = GpuContext::new().await.unwrap();
+        let kan = KAN::new(gpu, &[3, 8, 4, 2], &[4, 4, 4], -1.0..1.0, 8, 3).unwrap();
+
+        let input = vec![0.1, 0.2, 0.3];
+        let output = kan.forward(&input).unwrap();
+
+        for (i, val) in output.iter().enumerate() {
+            assert!(val.is_finite(), "Output {} is not finite: {}", i, val);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_kan_forward_deterministic() {
+        let gpu = GpuContext::new().await.unwrap();
+        let kan = KAN::new(gpu, &[2, 4, 1], &[4, 4], -1.0..1.0, 8, 3).unwrap();
+
+        let input = vec![0.5, -0.3];
+
+        let output1 = kan.forward(&input).unwrap();
+        let output2 = kan.forward(&input).unwrap();
+
+        for (a, b) in output1.iter().zip(output2.iter()) {
+            assert!((a - b).abs() < 1e-10, "Forward should be deterministic");
+        }
     }
 
     #[tokio::test]
@@ -209,7 +282,7 @@ mod tests {
                 let x = (i as f32 / 20.0) * 2.0 - 1.0;
                 let y = x.sin();
 
-                epoch_loss += kan.train(&[x], &[y], 0.01)?;
+                epoch_loss += kan.train(&[x], &[y], 0.01).unwrap();
             }
 
             epoch_loss /= 20.0;
@@ -220,7 +293,95 @@ mod tests {
             }
             prev_loss = epoch_loss;
         }
+    }
 
-        Ok::<(), KanError>(())
+    #[tokio::test]
+    async fn test_kan_train_returns_loss() {
+        let gpu = GpuContext::new().await.unwrap();
+        let mut kan = KAN::new(gpu, &[2, 4, 1], &[4, 4], -1.0..1.0, 8, 3).unwrap();
+
+        let input = vec![0.5, -0.3];
+        let target = vec![0.7];
+
+        let loss = kan.train(&input, &target, 0.01).unwrap();
+
+        assert!(loss >= 0.0, "Loss should be non-negative");
+        assert!(loss.is_finite(), "Loss should be finite");
+    }
+
+    #[tokio::test]
+    async fn test_kan_train_batch() {
+        let gpu = GpuContext::new().await.unwrap();
+        let mut kan = KAN::new(gpu, &[2, 4, 1], &[4, 4], -1.0..1.0, 8, 3).unwrap();
+
+        let inputs = vec![vec![0.1, 0.2], vec![0.3, 0.4], vec![0.5, 0.6]];
+
+        let targets = vec![vec![0.5], vec![0.6], vec![0.7]];
+
+        let loss = kan.train_batch(&inputs, &targets, 0.01).unwrap();
+
+        assert!(loss >= 0.0);
+        assert!(loss.is_finite());
+    }
+
+    #[tokio::test]
+    async fn test_kan_train_batch_mismatched_lengths() {
+        let gpu = GpuContext::new().await.unwrap();
+        let mut kan = KAN::new(gpu, &[2, 4, 1], &[4, 4], -1.0..1.0, 8, 3).unwrap();
+
+        let inputs = vec![vec![0.1, 0.2], vec![0.3, 0.4]];
+        let targets = vec![vec![0.5]]; // Wrong length
+
+        let result = kan.train_batch(&inputs, &targets, 0.01);
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_kan_parameter_count() {
+        let gpu = GpuContext::new().await.unwrap();
+        let kan = KAN::new(gpu, &[2, 4, 1], &[4, 4], -1.0..1.0, 8, 3).unwrap();
+
+        let count = kan.parameter_count();
+        assert!(count > 0, "Should have parameters");
+    }
+
+    #[tokio::test]
+    async fn test_kan_deeper_network() {
+        let gpu = GpuContext::new().await.unwrap();
+        let kan = KAN::new(
+            gpu,
+            &[4, 8, 8, 4, 2],
+            &[4, 4, 4, 4],
+            -1.0..1.0,
+            8,
+            3,
+        )
+        .unwrap();
+
+        assert_eq!(kan.layers.len(), 4);
+
+        let input = vec![0.1, 0.2, 0.3, 0.4];
+        let output = kan.forward(&input).unwrap();
+        assert_eq!(output.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_kan_different_inputs_different_outputs() {
+        let gpu = GpuContext::new().await.unwrap();
+        let kan = KAN::new(gpu, &[2, 4, 1], &[4, 4], -1.0..1.0, 8, 3).unwrap();
+
+        let input1 = vec![0.1, 0.2];
+        let input2 = vec![0.9, 0.8];
+
+        let output1 = kan.forward(&input1).unwrap();
+        let output2 = kan.forward(&input2).unwrap();
+
+        // Different inputs should produce different outputs
+        let different = output1
+            .iter()
+            .zip(output2.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-6);
+
+        assert!(different, "Different inputs should produce different outputs");
     }
 }

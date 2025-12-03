@@ -342,3 +342,135 @@ impl KANLayer {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_layer_creation() {
+        let gpu = GpuContext::new().await.unwrap();
+        let layer = KANLayer::new(gpu, 4, 2, 3, -1.0..1.0, 8, 3).unwrap();
+
+        assert_eq!(layer.input_dim, 4);
+        assert_eq!(layer.output_dim, 2);
+        assert_eq!(layer.functions.len(), 3);
+        assert_eq!(layer.projection.len(), 4 * 3); // input_dim * num_functions
+    }
+
+    #[tokio::test]
+    async fn test_layer_forward_dimensions() {
+        let gpu = GpuContext::new().await.unwrap();
+        let layer = KANLayer::new(gpu, 4, 2, 3, -1.0..1.0, 8, 3).unwrap();
+
+        let input = vec![0.1, 0.2, 0.3, 0.4];
+        let output = layer.forward(&input).unwrap();
+
+        assert_eq!(output.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_layer_forward_wrong_input_dim() {
+        let gpu = GpuContext::new().await.unwrap();
+        let layer = KANLayer::new(gpu, 4, 2, 3, -1.0..1.0, 8, 3).unwrap();
+
+        let input = vec![0.1, 0.2]; // Wrong size
+        let result = layer.forward(&input);
+
+        assert!(result.is_err());
+        match result {
+            Err(KanError::DimensionMismatch { expected, actual }) => {
+                assert_eq!(expected, 4);
+                assert_eq!(actual, 2);
+            }
+            _ => panic!("Expected DimensionMismatch error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_layer_forward_produces_finite_values() {
+        let gpu = GpuContext::new().await.unwrap();
+        let layer = KANLayer::new(gpu, 4, 2, 3, -1.0..1.0, 8, 3).unwrap();
+
+        let input = vec![0.5, -0.5, 0.3, -0.3];
+        let output = layer.forward(&input).unwrap();
+
+        for (i, val) in output.iter().enumerate() {
+            assert!(val.is_finite(), "Output {} is not finite: {}", i, val);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_layer_gpu_forward_dimensions() {
+        let gpu = GpuContext::new().await.unwrap();
+        let layer = KANLayer::new(gpu, 4, 2, 3, -1.0..1.0, 8, 3).unwrap();
+
+        let input = vec![0.1, 0.2, 0.3, 0.4];
+        let output = layer.forward_gpu(&input).await.unwrap();
+
+        assert_eq!(output.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_layer_backward_changes_weights() {
+        let gpu = GpuContext::new().await.unwrap();
+        let mut layer = KANLayer::new(gpu, 4, 2, 3, -1.0..1.0, 8, 3).unwrap();
+
+        let original_projection = layer.projection.clone();
+
+        let input = vec![0.1, 0.2, 0.3, 0.4];
+        let output_grad = vec![1.0, -1.0];
+
+        layer.backward(&input, &output_grad, 0.1);
+
+        // Projection should have changed
+        let changed = layer
+            .projection
+            .iter()
+            .zip(original_projection.iter())
+            .any(|(new, old)| (new - old).abs() > 1e-10);
+
+        assert!(changed, "Projection weights should change after backward");
+    }
+
+    #[tokio::test]
+    async fn test_layer_deterministic_forward() {
+        let gpu = GpuContext::new().await.unwrap();
+        let layer = KANLayer::new(gpu, 4, 2, 3, -1.0..1.0, 8, 3).unwrap();
+
+        let input = vec![0.1, 0.2, 0.3, 0.4];
+
+        let output1 = layer.forward(&input).unwrap();
+        let output2 = layer.forward(&input).unwrap();
+
+        for (a, b) in output1.iter().zip(output2.iter()) {
+            assert!(
+                (a - b).abs() < 1e-10,
+                "Forward pass should be deterministic"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_layer_different_inputs_different_outputs() {
+        let gpu = GpuContext::new().await.unwrap();
+        let layer = KANLayer::new(gpu, 4, 2, 3, -1.0..1.0, 8, 3).unwrap();
+
+        let input1 = vec![0.1, 0.2, 0.3, 0.4];
+        let input2 = vec![0.9, 0.8, 0.7, 0.6];
+
+        let output1 = layer.forward(&input1).unwrap();
+        let output2 = layer.forward(&input2).unwrap();
+
+        // Outputs should differ
+        let different = output1
+            .iter()
+            .zip(output2.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-10);
+
+        assert!(
+            different,
+            "Different inputs should produce different outputs"
+        );
+    }
+}

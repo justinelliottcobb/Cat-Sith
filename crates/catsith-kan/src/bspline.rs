@@ -301,6 +301,48 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn test_bspline_creation() {
+        let gpu = GpuContext::new().await.unwrap();
+        let spline = BSpline::new(gpu, 0.0..1.0, 8, 3).unwrap();
+
+        assert_eq!(spline.degree, 3);
+        // num_basis = num_knots + degree - 1 = 8 + 3 - 1 = 10
+        // But with padding: knots.len() = 8 + 2*3 = 14, num_basis = 14 - 3 - 1 = 10
+        assert!(spline.num_basis > 0);
+        assert!(spline.knots.len() > 0);
+    }
+
+    #[tokio::test]
+    async fn test_bspline_knot_structure() {
+        let gpu = GpuContext::new().await.unwrap();
+        let spline = BSpline::new(gpu, 0.0..1.0, 8, 3).unwrap();
+
+        // First `degree` knots should be at range.start
+        for i in 0..spline.degree {
+            assert_eq!(spline.knots[i], 0.0, "Padding knot {} should be 0.0", i);
+        }
+
+        // Last `degree` knots should be at range.end
+        let n = spline.knots.len();
+        for i in 0..spline.degree {
+            assert_eq!(
+                spline.knots[n - 1 - i],
+                1.0,
+                "Padding knot {} from end should be 1.0",
+                i
+            );
+        }
+
+        // Knots should be monotonically non-decreasing
+        for i in 1..spline.knots.len() {
+            assert!(
+                spline.knots[i] >= spline.knots[i - 1],
+                "Knots should be monotonic"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn test_bspline_cpu_gpu_match() {
         let gpu = GpuContext::new().await.unwrap();
         let spline = BSpline::new(gpu, 0.0..1.0, 8, 3).unwrap();
@@ -310,7 +352,13 @@ mod tests {
             let gpu = spline.evaluate_gpu(x).await;
 
             for (c, g) in cpu.iter().zip(gpu.iter()) {
-                assert!((c - g).abs() < 1e-5, "CPU/GPU mismatch at x={}: {} vs {}", x, c, g);
+                assert!(
+                    (c - g).abs() < 1e-5,
+                    "CPU/GPU mismatch at x={}: {} vs {}",
+                    x,
+                    c,
+                    g
+                );
             }
         }
     }
@@ -324,7 +372,133 @@ mod tests {
         for x in [0.1, 0.3, 0.5, 0.7, 0.9] {
             let basis = spline.evaluate(x);
             let sum: f32 = basis.iter().sum();
-            assert!((sum - 1.0).abs() < 1e-5, "Not partition of unity at x={}: sum={}", x, sum);
+            assert!(
+                (sum - 1.0).abs() < 1e-5,
+                "Not partition of unity at x={}: sum={}",
+                x,
+                sum
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bspline_non_negative() {
+        let gpu = GpuContext::new().await.unwrap();
+        let spline = BSpline::new(gpu, 0.0..1.0, 8, 3).unwrap();
+
+        // All B-spline basis functions should be non-negative
+        for x in [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0] {
+            let basis = spline.evaluate(x);
+            for (i, val) in basis.iter().enumerate() {
+                assert!(
+                    *val >= -1e-6,
+                    "Basis {} at x={} should be non-negative: {}",
+                    i,
+                    x,
+                    val
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bspline_local_support() {
+        let gpu = GpuContext::new().await.unwrap();
+        let spline = BSpline::new(gpu, 0.0..1.0, 8, 3).unwrap();
+
+        // Each basis function should only be non-zero in a local region
+        let basis = spline.evaluate(0.5);
+
+        // Count non-zero basis functions
+        let nonzero_count = basis.iter().filter(|&&v| v.abs() > 1e-6).count();
+
+        // For degree d, at most d+1 basis functions are non-zero at any point
+        assert!(
+            nonzero_count <= spline.degree + 1,
+            "Too many non-zero basis functions: {} (expected <= {})",
+            nonzero_count,
+            spline.degree + 1
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bspline_boundary_values() {
+        let gpu = GpuContext::new().await.unwrap();
+        let spline = BSpline::new(gpu, 0.0..1.0, 8, 3).unwrap();
+
+        // At left boundary, only first basis functions should be non-zero
+        let left = spline.evaluate(0.0);
+        assert!(left[0] > 0.9, "First basis should be ~1 at left boundary");
+
+        // At right boundary, only last basis functions should be non-zero
+        let right = spline.evaluate(1.0);
+        let last_idx = right.len() - 1;
+        assert!(
+            right[last_idx] > 0.9,
+            "Last basis should be ~1 at right boundary"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bspline_different_degrees() {
+        let gpu = GpuContext::new().await.unwrap();
+
+        // Test degree 1 (linear)
+        let linear = BSpline::new(gpu.clone(), 0.0..1.0, 8, 1).unwrap();
+        let basis_linear = linear.evaluate(0.5);
+        let sum_linear: f32 = basis_linear.iter().sum();
+        assert!((sum_linear - 1.0).abs() < 1e-5);
+
+        // Test degree 2 (quadratic)
+        let quadratic = BSpline::new(gpu.clone(), 0.0..1.0, 8, 2).unwrap();
+        let basis_quad = quadratic.evaluate(0.5);
+        let sum_quad: f32 = basis_quad.iter().sum();
+        assert!((sum_quad - 1.0).abs() < 1e-5);
+
+        // Test degree 4
+        let quartic = BSpline::new(gpu, 0.0..1.0, 8, 4).unwrap();
+        let basis_quart = quartic.evaluate(0.5);
+        let sum_quart: f32 = basis_quart.iter().sum();
+        assert!((sum_quart - 1.0).abs() < 1e-5);
+    }
+
+    #[tokio::test]
+    async fn test_bspline_different_ranges() {
+        let gpu = GpuContext::new().await.unwrap();
+
+        // Test negative range
+        let neg = BSpline::new(gpu.clone(), -1.0..1.0, 8, 3).unwrap();
+        let basis_neg = neg.evaluate(0.0);
+        let sum_neg: f32 = basis_neg.iter().sum();
+        assert!((sum_neg - 1.0).abs() < 1e-5);
+
+        // Test large range
+        let large = BSpline::new(gpu, 0.0..100.0, 8, 3).unwrap();
+        let basis_large = large.evaluate(50.0);
+        let sum_large: f32 = basis_large.iter().sum();
+        assert!((sum_large - 1.0).abs() < 1e-5);
+    }
+
+    #[tokio::test]
+    async fn test_bspline_continuity() {
+        let gpu = GpuContext::new().await.unwrap();
+        let spline = BSpline::new(gpu, 0.0..1.0, 8, 3).unwrap();
+
+        // Evaluate at nearby points - should be continuous
+        let epsilon = 0.001;
+        for x in [0.25, 0.5, 0.75] {
+            let left = spline.evaluate(x - epsilon);
+            let right = spline.evaluate(x + epsilon);
+
+            for (l, r) in left.iter().zip(right.iter()) {
+                assert!(
+                    (l - r).abs() < 0.1,
+                    "B-spline should be continuous: {} vs {} at x={}",
+                    l,
+                    r,
+                    x
+                );
+            }
         }
     }
 }

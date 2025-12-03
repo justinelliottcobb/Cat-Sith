@@ -395,3 +395,144 @@ impl UnivariateFunction {
             .write_buffer(&self.weights_buffer, 0, bytemuck::cast_slice(&self.weights));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_univariate_creation() {
+        let gpu = GpuContext::new().await.unwrap();
+        let func = UnivariateFunction::new(gpu, -1.0..1.0, 8, 3).unwrap();
+
+        // Should have correct number of weights
+        assert_eq!(func.weights.len(), func.spline.num_basis);
+        // Weights should be small (Xavier-like init)
+        for w in &func.weights {
+            assert!(w.abs() < 1.0, "Weight too large: {}", w);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_univariate_evaluate_cpu() {
+        let gpu = GpuContext::new().await.unwrap();
+        let func = UnivariateFunction::new(gpu, -1.0..1.0, 8, 3).unwrap();
+
+        // Evaluation should work at various points
+        for x in [-1.0, -0.5, 0.0, 0.5, 1.0] {
+            let result = func.evaluate(x);
+            assert!(result.is_finite(), "Non-finite result at x={}", x);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_univariate_cpu_gpu_match() {
+        let gpu = GpuContext::new().await.unwrap();
+        let func = UnivariateFunction::new(gpu, -1.0..1.0, 8, 3).unwrap();
+
+        for x in [-0.8, -0.3, 0.0, 0.4, 0.9] {
+            let cpu_result = func.evaluate(x);
+            let gpu_result = func.evaluate_gpu(x).await;
+
+            assert!(
+                (cpu_result - gpu_result).abs() < 1e-4,
+                "CPU/GPU mismatch at x={}: {} vs {}",
+                x,
+                cpu_result,
+                gpu_result
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_univariate_update_changes_weights() {
+        let gpu = GpuContext::new().await.unwrap();
+        let mut func = UnivariateFunction::new(gpu, -1.0..1.0, 8, 3).unwrap();
+
+        let original_weights = func.weights.clone();
+
+        // Apply an update
+        func.update(0.5, 1.0, 0.1);
+
+        // Weights should have changed
+        let changed = func
+            .weights
+            .iter()
+            .zip(original_weights.iter())
+            .any(|(new, old)| (new - old).abs() > 1e-10);
+
+        assert!(changed, "Weights should change after update");
+    }
+
+    #[tokio::test]
+    async fn test_univariate_update_gpu_changes_weights() {
+        let gpu = GpuContext::new().await.unwrap();
+        let mut func = UnivariateFunction::new(gpu, -1.0..1.0, 8, 3).unwrap();
+
+        let original_weights = func.weights.clone();
+
+        // Apply a GPU update
+        func.update_gpu(0.5, 1.0, 0.1).await;
+
+        // Weights should have changed
+        let changed = func
+            .weights
+            .iter()
+            .zip(original_weights.iter())
+            .any(|(new, old)| (new - old).abs() > 1e-10);
+
+        assert!(changed, "Weights should change after GPU update");
+    }
+
+    #[tokio::test]
+    async fn test_univariate_gradient_descent_direction() {
+        let gpu = GpuContext::new().await.unwrap();
+        let mut func = UnivariateFunction::new(gpu, -1.0..1.0, 8, 3).unwrap();
+
+        // Set known weights
+        for w in &mut func.weights {
+            *w = 0.5;
+        }
+        func.sync_to_gpu();
+
+        let x = 0.5;
+        let before = func.evaluate(x);
+
+        // Positive gradient should decrease output (gradient descent)
+        func.update(x, 1.0, 0.1);
+
+        let after = func.evaluate(x);
+
+        // Output should decrease when gradient is positive
+        assert!(
+            after < before,
+            "Gradient descent should decrease output: {} -> {}",
+            before,
+            after
+        );
+    }
+
+    #[tokio::test]
+    async fn test_univariate_sync_to_gpu() {
+        let gpu = GpuContext::new().await.unwrap();
+        let mut func = UnivariateFunction::new(gpu, -1.0..1.0, 8, 3).unwrap();
+
+        // Modify CPU weights
+        for w in &mut func.weights {
+            *w = 1.0;
+        }
+
+        // Sync to GPU
+        func.sync_to_gpu();
+
+        // GPU evaluation should reflect new weights
+        let result = func.evaluate_gpu(0.5).await;
+
+        // With all weights = 1.0, output should equal sum of basis functions = 1.0
+        assert!(
+            (result - 1.0).abs() < 0.1,
+            "After sync, GPU should use new weights: {}",
+            result
+        );
+    }
+}
