@@ -2,6 +2,58 @@
 //!
 //! This module provides GPU-accelerated image generation using Hugging Face's
 //! Candle framework with Stable Diffusion models.
+//!
+//! # Overview
+//!
+//! The [`CandleDiffusionPipeline`] implements a complete text-to-image pipeline:
+//!
+//! 1. **Tokenization**: Text prompts are tokenized using CLIP's BPE tokenizer
+//! 2. **Text Encoding**: Tokens are converted to embeddings via CLIP text encoder
+//! 3. **Denoising**: UNet iteratively denoises random latents guided by text embeddings
+//! 4. **Decoding**: VAE decoder converts latents to RGB images
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! use catsith_backend_neural::{CandleDiffusionPipeline, DiffusionConfig};
+//!
+//! // Use pixel art preset (64x64, 15 steps)
+//! let config = DiffusionConfig::pixel_art();
+//! let mut pipeline = CandleDiffusionPipeline::new(config)?;
+//! pipeline.load()?;
+//!
+//! let image = pipeline.generate(
+//!     "pixel art wizard casting spell",
+//!     Some("blurry, low quality"),  // negative prompt
+//!     42,  // seed (currently unused, for API compatibility)
+//! )?;
+//! image.save("wizard.png")?;
+//! ```
+//!
+//! # Configuration Presets
+//!
+//! - [`DiffusionConfig::default()`] - Standard 512x512, 20 steps
+//! - [`DiffusionConfig::pixel_art()`] - Small 64x64 sprites, 15 steps
+//! - [`DiffusionConfig::sprite_sheet()`] - 256x256 sprite sheets, 20 steps
+//!
+//! # Model Requirements
+//!
+//! The pipeline expects a standard Stable Diffusion model directory structure:
+//!
+//! ```text
+//! model_path/
+//! ├── tokenizer/
+//! │   └── tokenizer.json (or vocab.json + merges.txt)
+//! ├── text_encoder/
+//! │   └── model.safetensors (or pytorch_model.bin)
+//! ├── vae/
+//! │   └── diffusion_pytorch_model.safetensors (or .bin)
+//! └── unet/
+//!     └── diffusion_pytorch_model.safetensors (or .bin)
+//! ```
+//!
+//! If the tokenizer is not found locally, it will be downloaded from Hugging Face
+//! (openai/clip-vit-base-patch32 for SD 1.5/2.1, openai/clip-vit-large-patch14 for SDXL).
 
 #[cfg(feature = "candle")]
 use candle_core::{DType, Device, Module, Tensor};

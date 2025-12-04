@@ -30,7 +30,7 @@ CatSith consumes semantic scene descriptions and produces visual output across a
 | `catsith-pipeline` | Stable | Render pipeline stages, context flow |
 | `catsith-backend-terminal` | Working | ASCII/Unicode rendering with ANSI colors |
 | `catsith-backend-raster` | Working | CPU-based sprite compositing |
-| `catsith-backend-neural` | Scaffold | ONNX integration sketched, needs models |
+| `catsith-backend-neural` | Working | Candle-based Stable Diffusion inference |
 | `catsith-kan` | Foundation | KAN-based sprite generation, needs training |
 | `catsith-lora` | Planned | LoRA loading and application |
 | `catsith-domain-exospace` | Working | Space game domain (ships, asteroids, effects) |
@@ -85,24 +85,63 @@ The terminal backend renders semantic scenes as colored ASCII art:
 
 Entities are rendered with semantic awareness - ships show thrust effects, damaged entities flicker, explosions animate.
 
-## Neural Rendering (Planned)
+## Neural Rendering
 
-The neural backend will support multiple model architectures:
+The neural backend supports GPU-accelerated image generation using Hugging Face's Candle framework.
 
-### ONNX Models
-- **Segmind Tiny-SD**: Distilled Stable Diffusion for sprite generation
-- **Custom VAE**: Encode/decode sprites from latent space
-- **Text Embedder**: Convert semantic descriptions to embeddings
+### Candle Diffusion Pipeline
 
-See [docs/NEURAL_MODELS.md](docs/NEURAL_MODELS.md) for model recommendations.
+The primary neural rendering approach uses Stable Diffusion models via Candle:
+
+```rust
+use catsith_backend_neural::{CandleDiffusionPipeline, DiffusionConfig};
+
+// Create a pipeline configured for pixel art sprites
+let config = DiffusionConfig::pixel_art();
+let mut pipeline = CandleDiffusionPipeline::new(config)?;
+
+// Load model components (downloads tokenizer from HuggingFace if needed)
+pipeline.load()?;
+
+// Generate an image from a text prompt
+let image = pipeline.generate("pixel art spaceship sprite", None, 42)?;
+image.save("spaceship.png")?;
+```
+
+Supported model versions:
+- **SD 1.5** - Most compatible, good for pixel art LoRAs
+- **SD 2.1** - Improved quality
+- **SDXL** - High resolution, best quality
+- **SDXL Turbo** - Fast generation (4 steps)
+
+### Model Downloads
+
+Download Stable Diffusion models using the Hugging Face CLI:
+
+```bash
+# Install HF CLI if needed
+pip install huggingface_hub
+
+# Download a pixel art model
+hf download kohbanye/pixel-art-style --local-dir models/pixel-art-style
+```
+
+The pipeline supports both safetensors and PyTorch checkpoint formats.
 
 ### KAN (Kolmogorov-Arnold Networks)
-A novel approach using learnable B-spline activation functions:
+
+An alternative approach using learnable B-spline activation functions:
 - Parameter-efficient sprite generation
 - Smooth latent space interpolation
+- WebGPU-accelerated inference
 - Interpretable learned functions
 
 See [crates/catsith-kan/ROADMAP.md](crates/catsith-kan/ROADMAP.md) for development status.
+
+### Legacy ONNX Support
+
+ONNX model support is available for compatibility with converted models.
+See [docs/NEURAL_MODELS.md](docs/NEURAL_MODELS.md) for model recommendations.
 
 ## Domain System
 
@@ -170,15 +209,22 @@ cargo clippy --workspace
 ### Building with Optional Features
 
 ```bash
+# Enable Candle-based Stable Diffusion (recommended for neural rendering)
+cargo build -p catsith-backend-neural --features candle
+
 # Enable KAN support in neural backend
 cargo build -p catsith-backend-neural --features kan
+
+# Enable both
+cargo build -p catsith-backend-neural --features "candle,kan"
 ```
 
 ## Requirements
 
 - Rust 1.85+ (2024 edition)
 - For terminal backend: Any terminal with ANSI color support
-- For neural backend: GPU recommended (WebGPU for KAN, CUDA/Metal for ONNX)
+- For neural backend (Candle): CPU or CUDA GPU (CUDA recommended for performance)
+- For KAN backend: WebGPU-capable GPU
 
 ## License
 
