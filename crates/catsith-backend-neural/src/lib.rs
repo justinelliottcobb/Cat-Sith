@@ -9,19 +9,23 @@
 //!
 //! 1. **Embedder**: Converts semantic descriptions to embeddings
 //! 2. **Sprite VAE**: Generates small sprites from embeddings
-//! 3. **Diffusion**: Generates high-quality images (optional)
+//! 3. **Diffusion**: Generates high-quality images via Candle/Stable Diffusion
 //! 4. **KAN**: Kolmogorov-Arnold Networks for learned sprite generation (optional)
 //!
 //! # Model Loading
 //!
 //! Models are loaded from disk or downloaded on demand.
-//! Supported formats: ONNX (via tract), KAN (native Rust with WebGPU)
+//! Supported formats:
+//! - Candle: safetensors, PyTorch .bin files (recommended)
+//! - ONNX: via tract (legacy)
+//! - KAN: native Rust with WebGPU
 //!
-//! # Implementation Status
+//! # Features
 //!
-//! See [`onnx`] module for the ONNX integration design and implementation plan.
-//! See `docs/NEURAL_MODELS.md` for model recommendations and training roadmap.
+//! - `candle`: Enable Candle-based Stable Diffusion inference (recommended)
+//! - `kan`: Enable KAN-based sprite generation
 
+pub mod candle;
 pub mod embedder;
 pub mod inference;
 #[cfg(feature = "kan")]
@@ -32,6 +36,7 @@ pub mod renderer;
 pub mod temporal;
 
 // Re-export commonly used types
+pub use crate::candle::{CandleDiffusionPipeline, DiffusionConfig, GeneratedImage};
 pub use embedder::TextEmbedder;
 pub use inference::{InferenceEngine, InferenceError};
 pub use onnx::{DiffusionPipeline, OnnxRuntime, SpriteVAE};

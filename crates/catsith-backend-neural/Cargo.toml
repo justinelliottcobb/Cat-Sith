@@ -16,15 +16,19 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 image = { workspace = true }
 
-# Neural inference - optional since it requires model files
-# tract-onnx = { workspace = true, optional = true }
+# Candle - Hugging Face's Rust ML framework
+candle-core = { workspace = true, optional = true }
+candle-nn = { workspace = true, optional = true }
+candle-transformers = { workspace = true, optional = true }
+hf-hub = { workspace = true, optional = true }
+tokenizers = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
 
 [features]
 default = []
-# Enable tract ONNX inference
-# onnx = ["tract-onnx"]
+# Enable Candle-based Stable Diffusion inference
+candle = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "tokenizers"]
 # Enable KAN-based sprite generation
 kan = ["catsith-kan"]

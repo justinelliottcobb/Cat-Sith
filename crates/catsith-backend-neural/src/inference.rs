@@ -12,17 +12,38 @@ pub enum InferenceError {
     #[error("Model not found: {0}")]
     ModelNotFound(String),
 
+    #[error("Model not loaded: {0}")]
+    ModelNotLoaded(String),
+
+    #[error("Model load error: {0}")]
+    ModelLoadError(String),
+
     #[error("Invalid model format: {0}")]
     InvalidFormat(String),
 
     #[error("Inference failed: {0}")]
     InferenceFailed(String),
 
+    #[error("Inference error: {0}")]
+    InferenceError(String),
+
+    #[error("Device error: {0}")]
+    DeviceError(String),
+
+    #[error("Tokenizer error: {0}")]
+    TokenizerError(String),
+
+    #[error("IO error: {0}")]
+    IoError(String),
+
     #[error("Shape mismatch: expected {expected:?}, got {actual:?}")]
     ShapeMismatch {
         expected: Vec<usize>,
         actual: Vec<usize>,
     },
+
+    #[error("Feature not enabled: {0}")]
+    FeatureDisabled(String),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
