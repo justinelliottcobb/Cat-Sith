@@ -77,7 +77,10 @@ pub mod renderer;
 pub mod temporal;
 
 // Re-export commonly used types
-pub use crate::candle::{CandleDiffusionPipeline, DiffusionConfig, GeneratedImage};
+pub use crate::candle::{
+    CandleDiffusionPipeline, DiffusionConfig, GeneratedImage,
+    LoadedLora, LoraLayer, LoraMode, StableDiffusionVersion,
+};
 pub use embedder::TextEmbedder;
 pub use inference::{InferenceEngine, InferenceError};
 pub use onnx::{DiffusionPipeline, OnnxRuntime, SpriteVAE};

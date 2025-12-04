@@ -41,7 +41,7 @@ enum Commands {
         width: u32,
 
         /// Output height
-        #[arg(short, long, default_value = "24")]
+        #[arg(long, default_value = "24")]
         height: u32,
 
         /// Number of frames to render
