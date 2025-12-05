@@ -419,6 +419,8 @@ dependencies = [
  "catsith-pipeline",
  "hf-hub",
  "image",
+ "serde",
+ "serde_json",
  "thiserror 2.0.17",
  "tokenizers",
  "tokio",
@@ -458,6 +460,7 @@ name = "catsith-cli"
 version = "0.1.0"
 dependencies = [
  "catsith-api",
+ "catsith-backend-neural",
  "catsith-backend-raster",
  "catsith-backend-terminal",
  "catsith-core",
@@ -465,6 +468,7 @@ dependencies = [
  "catsith-lora",
  "catsith-pipeline",
  "clap",
+ "image",
  "serde_json",
  "thiserror 2.0.17",
  "tokio",

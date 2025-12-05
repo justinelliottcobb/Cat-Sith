@@ -11,12 +11,17 @@ repository.workspace = true
 name = "catsith"
 path = "src/main.rs"
 
+[features]
+default = []
+candle = ["catsith-backend-neural/candle"]
+
 [dependencies]
 catsith-core = { workspace = true }
 catsith-api = { workspace = true }
 catsith-pipeline = { workspace = true }
 catsith-backend-terminal = { workspace = true }
 catsith-backend-raster = { workspace = true }
+catsith-backend-neural = { workspace = true }
 catsith-lora = { workspace = true }
 catsith-domain-exospace = { workspace = true }
 
@@ -26,3 +31,4 @@ tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 serde_json = { workspace = true }
+image = { workspace = true }

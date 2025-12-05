@@ -364,11 +364,20 @@ impl CandleDiffusionPipeline {
     pub fn load_tokenizer_from(&mut self, path: impl AsRef<Path>) -> Result<(), InferenceError> {
         let path = path.as_ref();
         let tokenizer_json = path.join("tokenizer.json");
+        let vocab_json = path.join("vocab.json");
+        let merges_txt = path.join("merges.txt");
 
         // Try local tokenizer.json first
         if tokenizer_json.exists() {
             let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_json)
                 .map_err(|e| InferenceError::ModelLoadError(e.to_string()))?;
+            self.tokenizer = Some(tokenizer);
+            return Ok(());
+        }
+
+        // Try vocab.json + merges.txt (older CLIP format)
+        if vocab_json.exists() && merges_txt.exists() {
+            let tokenizer = Self::load_clip_tokenizer(&vocab_json, &merges_txt)?;
             self.tokenizer = Some(tokenizer);
             return Ok(());
         }
@@ -395,6 +404,45 @@ impl CandleDiffusionPipeline {
 
         self.tokenizer = Some(tokenizer);
         Ok(())
+    }
+
+    /// Load CLIP tokenizer from vocab.json and merges.txt
+    fn load_clip_tokenizer(
+        vocab_path: &Path,
+        merges_path: &Path,
+    ) -> Result<tokenizers::Tokenizer, InferenceError> {
+        use tokenizers::models::bpe::BPE;
+        use tokenizers::pre_tokenizers::byte_level::ByteLevel;
+        use tokenizers::processors::template::TemplateProcessing;
+
+        // Load BPE model from vocab and merges files
+        let bpe = BPE::from_file(
+            vocab_path.to_str().ok_or_else(|| InferenceError::ModelLoadError("Invalid vocab path".into()))?,
+            merges_path.to_str().ok_or_else(|| InferenceError::ModelLoadError("Invalid merges path".into()))?,
+        )
+        .unk_token("<|endoftext|>".to_string())
+        .build()
+        .map_err(|e| InferenceError::TokenizerError(e.to_string()))?;
+
+        let mut tokenizer = tokenizers::Tokenizer::new(bpe);
+
+        // Set up CLIP-style pre-tokenization
+        tokenizer.with_pre_tokenizer(Some(ByteLevel::new(false, true, false)));
+
+        // Set up post-processing with start/end tokens
+        // CLIP uses <|startoftext|> (49406) and <|endoftext|> (49407)
+        let template = TemplateProcessing::builder()
+            .try_single("<|startoftext|> $A <|endoftext|>")
+            .map_err(|e| InferenceError::TokenizerError(e.to_string()))?
+            .special_tokens(vec![
+                ("<|startoftext|>", 49406),
+                ("<|endoftext|>", 49407),
+            ])
+            .build()
+            .map_err(|e| InferenceError::TokenizerError(e.to_string()))?;
+        tokenizer.with_post_processor(Some(template));
+
+        Ok(tokenizer)
     }
 
     /// Load text encoder from config.model_path
@@ -440,8 +488,55 @@ impl CandleDiffusionPipeline {
         let path = path.as_ref();
         let vb = Self::load_weights(path, self.dtype, &self.device)?;
 
-        // VAE config based on version (SDXL has different block channels)
-        let vae_config = match self.config.version {
+        // Try to load VAE config from config.json
+        let vae_config = self.load_vae_config(path)?;
+
+        let vae = stable_diffusion::vae::AutoEncoderKL::new(
+            vb,
+            3,  // in_channels
+            3,  // out_channels
+            vae_config,
+        ).map_err(|e| InferenceError::ModelLoadError(e.to_string()))?;
+
+        self.vae = Some(vae);
+        Ok(())
+    }
+
+    /// Load VAE config from config.json or use defaults
+    fn load_vae_config(&self, path: &Path) -> Result<stable_diffusion::vae::AutoEncoderKLConfig, InferenceError> {
+        let config_path = path.join("config.json");
+
+        if config_path.exists() {
+            let config_str = std::fs::read_to_string(&config_path)
+                .map_err(|e| InferenceError::IoError(e.to_string()))?;
+
+            // Parse just the fields we need
+            #[derive(serde::Deserialize)]
+            struct VaeConfigJson {
+                #[serde(default)]
+                block_out_channels: Option<Vec<usize>>,
+                #[serde(default)]
+                layers_per_block: Option<usize>,
+                #[serde(default)]
+                latent_channels: Option<usize>,
+                #[serde(default)]
+                norm_num_groups: Option<usize>,
+            }
+
+            if let Ok(json_config) = serde_json::from_str::<VaeConfigJson>(&config_str) {
+                return Ok(stable_diffusion::vae::AutoEncoderKLConfig {
+                    block_out_channels: json_config.block_out_channels.unwrap_or_else(|| vec![64, 128, 256, 512]),
+                    layers_per_block: json_config.layers_per_block.unwrap_or(2),
+                    latent_channels: json_config.latent_channels.unwrap_or(4),
+                    norm_num_groups: json_config.norm_num_groups.unwrap_or(32),
+                    use_quant_conv: true,
+                    use_post_quant_conv: true,
+                });
+            }
+        }
+
+        // Fall back to version-based defaults
+        Ok(match self.config.version {
             StableDiffusionVersion::Xl | StableDiffusionVersion::Turbo => {
                 stable_diffusion::vae::AutoEncoderKLConfig {
                     block_out_channels: vec![128, 256, 512, 512],
@@ -453,17 +548,7 @@ impl CandleDiffusionPipeline {
                 }
             }
             _ => stable_diffusion::vae::AutoEncoderKLConfig::default(),
-        };
-
-        let vae = stable_diffusion::vae::AutoEncoderKL::new(
-            vb,
-            3,  // in_channels
-            3,  // out_channels
-            vae_config,
-        ).map_err(|e| InferenceError::ModelLoadError(e.to_string()))?;
-
-        self.vae = Some(vae);
-        Ok(())
+        })
     }
 
     /// Load UNet from config.model_path
@@ -479,8 +564,8 @@ impl CandleDiffusionPipeline {
 
         let vb = Self::load_weights(path, self.dtype, &self.device)?;
 
-        // Use default UNet config (SD 1.5 style)
-        let unet_config = stable_diffusion::unet_2d::UNet2DConditionModelConfig::default();
+        // Load UNet config from config.json or use defaults
+        let unet_config = self.load_unet_config(path)?;
 
         let unet = stable_diffusion::unet_2d::UNet2DConditionModel::new(
             vb,
@@ -493,6 +578,63 @@ impl CandleDiffusionPipeline {
         self.unet = Some(unet);
         self.loras_applied = false; // UNet changed, LoRAs need re-apply
         Ok(())
+    }
+
+    /// Load UNet config from config.json or use defaults
+    fn load_unet_config(&self, path: &Path) -> Result<stable_diffusion::unet_2d::UNet2DConditionModelConfig, InferenceError> {
+        use stable_diffusion::unet_2d::{UNet2DConditionModelConfig, BlockConfig};
+
+        let config_path = path.join("config.json");
+
+        if config_path.exists() {
+            let config_str = std::fs::read_to_string(&config_path)
+                .map_err(|e| InferenceError::IoError(e.to_string()))?;
+
+            #[derive(serde::Deserialize)]
+            struct UNetConfigJson {
+                #[serde(default)]
+                block_out_channels: Option<Vec<usize>>,
+                #[serde(default)]
+                cross_attention_dim: Option<usize>,
+                #[serde(default)]
+                attention_head_dim: Option<usize>,
+                #[serde(default)]
+                layers_per_block: Option<usize>,
+                #[serde(default)]
+                use_linear_projection: Option<bool>,
+            }
+
+            if let Ok(json_config) = serde_json::from_str::<UNetConfigJson>(&config_str) {
+                let blocks = json_config.block_out_channels.unwrap_or_else(|| vec![320, 640, 1280, 1280]);
+                let n_blocks = blocks.len();
+                let attention_head_dim = json_config.attention_head_dim.unwrap_or(8);
+
+                return Ok(UNet2DConditionModelConfig {
+                    blocks: blocks.into_iter().enumerate().map(|(i, out_channels)| {
+                        BlockConfig {
+                            out_channels,
+                            // Last block has no attention, others use 1 transformer block
+                            use_cross_attn: if i < n_blocks - 1 { Some(1) } else { None },
+                            attention_head_dim,
+                        }
+                    }).collect(),
+                    center_input_sample: false,
+                    cross_attention_dim: json_config.cross_attention_dim.unwrap_or(768),
+                    downsample_padding: 1,
+                    flip_sin_to_cos: true,
+                    freq_shift: 0.0,
+                    layers_per_block: json_config.layers_per_block.unwrap_or(2),
+                    mid_block_scale_factor: 1.0,
+                    norm_eps: 1e-5,
+                    norm_num_groups: 32,
+                    sliced_attention_size: None,
+                    use_linear_projection: json_config.use_linear_projection.unwrap_or(false),
+                });
+            }
+        }
+
+        // Fall back to SD 1.5 default
+        Ok(stable_diffusion::unet_2d::UNet2DConditionModelConfig::default())
     }
 
     /// Helper to load weights from a directory (tries safetensors then .bin)
@@ -1089,7 +1231,10 @@ impl CandleDiffusionPipeline {
         width: usize,
     ) -> Result<Tensor, InferenceError> {
         let shape = (1, 4, height, width);
-        Tensor::randn(0f32, 1f32, shape, &self.device)
+        let latent = Tensor::randn(0f32, 1f32, shape, &self.device)
+            .map_err(|e| InferenceError::InferenceError(e.to_string()))?;
+        // Convert to model dtype
+        latent.to_dtype(self.dtype)
             .map_err(|e| InferenceError::InferenceError(e.to_string()))
     }
 
